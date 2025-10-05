@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Magic - Google Photos Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #3367d6;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .photos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .photo-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+        }
+        .photo-item img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+        .photo-info {
+            padding: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Photo Magic - Google Photos Demo</h1>
+        
+        <div id="status" class="status info">
+            Ready to connect to Google Photos
+        </div>
+
+        <div>
+            <button id="authBtn" onclick="authenticate()">Authenticate with Google</button>
+            <button id="statusBtn" onclick="checkStatus()">Check Status</button>
+            <button id="photosBtn" onclick="getPhotos()" disabled>Get Last 100 Photos</button>
+            <button id="clearBtn" onclick="clearPhotos()">Clear Photos</button>
+        </div>
+
+        <div>
+            <h3>Photos loaded: <span id="photoCount">0</span></h3>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Loading photos...
+        </div>
+
+        <div id="photosGrid" class="photos-grid"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000';
+        
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        async function authenticate() {
+            try {
+                updateStatus('Getting authentication URL...', 'info');
+                
+                const response = await fetch(`${API_BASE}/auth/google`);
+                const data = await response.json();
+                
+                if (data.authUrl) {
+                    updateStatus('Redirecting to Google for authentication...', 'info');
+                    window.open(data.authUrl, '_blank');
+                    
+                    // Check status periodically after opening auth window
+                    const checkInterval = setInterval(async () => {
+                        const statusResp = await fetch(`${API_BASE}/auth/status`);
+                        const statusData = await statusResp.json();
+                        
+                        if (statusData.authenticated) {
+                            clearInterval(checkInterval);
+                            updateStatus('Successfully authenticated!', 'success');
+                            document.getElementById('photosBtn').disabled = false;
+                        }
+                    }, 2000);
+                } else {
+                    updateStatus('Failed to get authentication URL', 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/auth/status`);
+                const data = await response.json();
+                
+                if (data.authenticated) {
+                    updateStatus(`Authenticated (expires: ${new Date(data.tokenExpiry).toLocaleString()})`, 'success');
+                    document.getElementById('photosBtn').disabled = false;
+                } else {
+                    updateStatus('Not authenticated', 'info');
+                    document.getElementById('photosBtn').disabled = true;
+                }
+            } catch (error) {
+                updateStatus(`Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        async function getPhotos() {
+            const loadingEl = document.getElementById('loading');
+            const photosGrid = document.getElementById('photosGrid');
+            
+            try {
+                loadingEl.style.display = 'block';
+                updateStatus('Fetching photos...', 'info');
+                
+                const response = await fetch(`${API_BASE}/photos`);
+                const data = await response.json();
+                
+                loadingEl.style.display = 'none';
+                
+                if (response.ok) {
+                    updateStatus(`Successfully loaded ${data.count} photos`, 'success');
+                    displayPhotos(data.photos);
+                } else {
+                    updateStatus(`Error: ${data.error}`, 'error');
+                    if (response.status === 401) {
+                        document.getElementById('photosBtn').disabled = true;
+                    }
+                }
+            } catch (error) {
+                loadingEl.style.display = 'none';
+                updateStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function displayPhotos(photos) {
+            const photosGrid = document.getElementById('photosGrid');
+            const photoCount = document.getElementById('photoCount');
+            
+            photosGrid.innerHTML = '';
+            photoCount.textContent = photos.length;
+            
+            photos.forEach(photo => {
+                const photoItem = document.createElement('div');
+                photoItem.className = 'photo-item';
+                
+                const creationDate = new Date(photo.creationTime).toLocaleDateString();
+                
+                photoItem.innerHTML = `
+                    <img src="${photo.thumbnailUrl}" alt="${photo.filename}" 
+                         onclick="window.open('${photo.fullSizeUrl}', '_blank')">
+                    <div class="photo-info">
+                        <div><strong>${photo.filename}</strong></div>
+                        <div>Created: ${creationDate}</div>
+                        <div>${photo.width} × ${photo.height}</div>
+                    </div>
+                `;
+                
+                photosGrid.appendChild(photoItem);
+            });
+        }
+
+        function clearPhotos() {
+            document.getElementById('photosGrid').innerHTML = '';
+            document.getElementById('photoCount').textContent = '0';
+            updateStatus('Photos cleared', 'info');
+        }
+
+        // Check status on page load
+        checkStatus();
+    </script>
+</body>
+</html>
